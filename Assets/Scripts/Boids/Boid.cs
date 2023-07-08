@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Collections;
 using UnityEngine.Events;
+using UnityEngine.AI;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -26,6 +27,8 @@ public class Boid : MonoBehaviour
 
     private SphereCollider visionTrigger;
     private List<Boid> boidsInSight;
+
+    private NavMeshAgent agent;
 
 #if UNITY_EDITOR
     void OnDrawGizmosSelected()
@@ -111,6 +114,31 @@ public class Boid : MonoBehaviour
     }
 #endif
 
+    void OnValidate()
+    {
+        Awake();
+        visionTrigger.radius = viewRadius;
+    }
+
+    void Awake()
+    {
+        visionTrigger = GetComponent<SphereCollider>();
+        agent = GetComponent<NavMeshAgent>();
+    }
+
+    void Start()
+    {
+        transform.Rotate(Vector3.up, Random.Range(0f, 360f));
+    }
+
+    void Update()
+    {
+        Vector3 direction = FindUnobstructedDirection();
+
+        agent.Move(direction * Time.deltaTime);
+        transform.LookAt(transform.position + direction, Vector3.up);
+    }
+
     void OnTriggerEnter(Collider other)
     {
         Boid neighbor;
@@ -153,12 +181,12 @@ public class Boid : MonoBehaviour
         boidsInSight.Remove(neighbor);
     }
 
-    private Vector2[] LookAround(UnityAction<Vector2, float> callback)
+    private List<Vector2> LookAround(UnityAction<Vector2, float> callback)
     {
         int numPoints = 360;
         float angle = 360f / (float)numPoints;
-        Vector2[] array = new Vector2[numPoints];
-        for (int i = 0; i < numPoints; i++)
+        List<Vector2> directions = new();
+        for (int i = 0; i < numPoints / 2; i++)
         {
             if (Mathf.Abs((angle * i) - 180f) < ((360f - viewAngle) * 0.5f))
             {
@@ -169,14 +197,24 @@ public class Boid : MonoBehaviour
             float y = (angle * i).Cos();
             Vector2 vector = new Vector2(x, y) * viewRadius;
 
-            //float lerpT = i / (float)numPoints;
-            float lerpT = Vector2.Distance(Vector2.up * viewRadius, vector) / viewRadius * 0.5f;
+            float lerpT = i / (float)(numPoints / 2);
+            //float lerpT = Vector2.Distance(Vector2.up * viewRadius, vector) / viewRadius * 0.5f;
             //float lerpT = (-y + 1f) / 2f;
 
             callback?.Invoke(vector, lerpT);
-            array[i] = vector;
+            directions.Add(vector);
+
+            if (angle * i > 0f && angle * i < 360f)
+            {
+                x = (angle * -i).Sin();
+                y = (angle * -i).Cos();
+                vector = new Vector2(x, y) * viewRadius;
+
+                callback?.Invoke(vector, lerpT);
+                directions.Add(vector);
+            }
         }
-        return array;
+        return directions;
     }
     /*
     private void LookAround_GoldenRatio(UnityAction<Vector2, float> callback)
@@ -210,30 +248,30 @@ public class Boid : MonoBehaviour
         float furthestUnobstructedDst = 0;
         RaycastHit hit;
 
-        Vector2[] rayDirections = LookAround(null);
+        List<Vector2> rayDirections = LookAround(null);
 
-        for (int i = 0; i < rayDirections.Length; i++)
+        for (int i = 0; i < rayDirections.Count; i++)
         {
             // tranform form local to world space so that smaller dir changes are examined first
             Vector3 dir = transform.TransformDirection(rayDirections[i].ToVector3XZ());
-            if (Physics.SphereCast(transform.position, viewSphereCastRadius, dir, out hit, viewRadius, obstacleMask))
+            if (Physics.SphereCast(transform.position, viewSphereCastRadius, dir, out hit, viewRadius, obstacleMask, QueryTriggerInteraction.Ignore))
             {
                 if (hit.distance > furthestUnobstructedDst)
                 {
                     bestDir = dir;
                     furthestUnobstructedDst = hit.distance;
-                    Debug.DrawRay(transform.position, bestDir, Color.red);
+                    Debug.DrawRay(transform.position, bestDir, Color.red, 1f);
                 }
             }
             else
             {
                 // no obstacle in view radius, so return this direction
-                Debug.DrawRay(transform.position, bestDir, Color.green);
+                Debug.DrawRay(transform.position, bestDir, Color.green, 1f);
                 return dir;
             }
         }
         // obstacles all around, so return dir where obstacle is furthest away
-        Debug.DrawRay(transform.position, bestDir, Color.green);
+        Debug.DrawRay(transform.position, bestDir, Color.blue, 1f);
         return bestDir;
     }
 }
