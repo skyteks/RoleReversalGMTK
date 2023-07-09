@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Unity.Collections;
 using UnityEngine.Events;
 using UnityEngine.AI;
 #if UNITY_EDITOR
@@ -17,9 +16,13 @@ public class Boid : MonoBehaviour
     [SerializeField]
     private float alignmentWeight = 0.36f; // Weight for alignment behavior
     [SerializeField]
+    private float forwardWeight = 1f; // Weight for alignment behavior
+    [SerializeField]
     private float maxSpeed = 2f; // Maximum speed of the boids
     [SerializeField]
     private float maxForce = 1f;
+
+    [Space]
 
     [SerializeField]
     [Range(0f, 20f)]
@@ -32,9 +35,28 @@ public class Boid : MonoBehaviour
     [SerializeField]
     private float viewSphereCastRadius = 0.1f;
 
-    private SphereCollider visionTrigger;
-    private List<Boid> neighborsInSight = new();
+    [Space]
 
+    [SerializeField]
+    private bool randomiseStartPosition;
+
+    [SerializeField, ReadOnly]
+    private Vector3 cohesion;
+    [SerializeField, ReadOnly]
+    private Vector3 separation;
+    [SerializeField, ReadOnly]
+    private Vector3 alignment;
+    [SerializeField, ReadOnly]
+    private Vector3 forwardDirection;
+
+    private List<Boid> neighborsInSight = new();
+    private Vector3 centerOfMass;
+    private Vector3 lastFramePosition;
+    private float lastDeltaTime = float.PositiveInfinity;
+    [SerializeField, ReadOnly]
+    private Vector3 velocity;
+
+    private SphereCollider visionTrigger;
     private NavMeshAgent agent;
 
 #if UNITY_EDITOR
@@ -44,6 +66,7 @@ public class Boid : MonoBehaviour
         //DebugDrawConnections();
         //DebugDrawDirections();
         //LookAround(DebugDrawLookPoints);
+        DebugDrawCenterOfMass();
     }
 
     private void DebugDrawVision()
@@ -118,6 +141,18 @@ public class Boid : MonoBehaviour
         Handles.color = Color.Lerp(Color.red, Color.blue, lerpT);//Color.magenta;
         Handles.DrawSolidDisc(vector.ToVector3XZ(), Vector3.up, 0.02f);
     }
+
+    private void DebugDrawCenterOfMass()
+    {
+        if (neighborsInSight.Count == 0)
+        {
+            return;
+        }
+
+        Handles.color = Color.black;
+        Handles.DrawSolidDisc(centerOfMass, Vector3.up, 0.2f);
+    }
+
 #endif
 
     void OnValidate()
@@ -134,47 +169,55 @@ public class Boid : MonoBehaviour
 
     void Start()
     {
-        transform.Rotate(Vector3.up, Random.Range(0f, 360f));
+        // randomize start rotation
+        if (randomiseStartPosition)
+        {
+            RandomizeRotation();
+        }
     }
 
     void Update()
     {
-        /*
-        Vector3 direction = FindUnobstructedDirection();
-
-        agent.Move(direction * Time.deltaTime);
-        transform.LookAt(transform.position + direction, Vector3.up);
-        */
+        velocity = (transform.position - lastFramePosition) / lastDeltaTime;
+        lastDeltaTime = Time.deltaTime;
+        lastFramePosition = transform.position;
 
         // Calculate the combined steering force from cohesion, separation, and alignment
         Vector3 steeringForce = Vector3.zero;
 
-        Vector3 cohesion = Cohesion();
-        Vector3 separation = Separation();
-        Vector3 alignment = Alignment();
+        cohesion = Cohesion();
+        separation = Separation();
+        alignment = Alignment();
+        forwardDirection = FindUnobstructedDirection();
         steeringForce += cohesion * cohesionWeight;
         steeringForce += separation * separationWeight;
         steeringForce += alignment * alignmentWeight;
 
+        steeringForce += forwardDirection * forwardWeight;
+
         // Limit the steering force to the maximum force
         steeringForce = Vector3.ClampMagnitude(steeringForce, maxForce);
 
+
         // Apply the steering force to the zombie's position using agent.Move()
-        Vector3 desiredVelocity = agent.velocity + steeringForce * Time.deltaTime;
+        Vector3 desiredVelocity = velocity + steeringForce * Time.deltaTime;
         desiredVelocity = Vector3.ClampMagnitude(desiredVelocity, maxSpeed);
         Vector3 deltaPosition = desiredVelocity * Time.deltaTime;
         agent.Move(deltaPosition);
+        if (velocity.magnitude > 0.1f)
+        {
+            transform.forward = velocity.normalized;
+        }
     }
 
     void OnTriggerEnter(Collider other)
     {
-        Boid neighbor;
-        if (!other.gameObject.TryGetComponent<Boid>(out neighbor))
+        if (other.isTrigger)
         {
             return;
         }
 
-        if (neighbor == this)
+        if (!other.gameObject.TryGetComponent<Boid>(out Boid neighbor) || neighbor == this)
         {
             return;
         }
@@ -196,13 +239,12 @@ public class Boid : MonoBehaviour
 
     void OnTriggerExit(Collider other)
     {
-        Boid neighbor;
-        if (!other.gameObject.TryGetComponent<Boid>(out neighbor))
+        if (other.isTrigger)
         {
             return;
         }
 
-        if (neighbor == this)
+        if (!other.gameObject.TryGetComponent<Boid>(out Boid neighbor) || neighbor == this)
         {
             return;
         }
@@ -210,10 +252,16 @@ public class Boid : MonoBehaviour
         neighborsInSight.Remove(neighbor);
     }
 
-    // Calculate the average position of nearby boids and steer towards it
-    Vector3 Cohesion()
+    [ContextMenu("Ramdonize Rotation")]
+    private void RandomizeRotation()
     {
-        Vector3 centerOfMass = Vector3.zero;
+        transform.Rotate(Vector3.up, Random.Range(0f, 360f));
+    }
+
+    // Calculate the average position of nearby boids and steer towards it
+    private Vector3 Cohesion()
+    {
+        centerOfMass = Vector3.zero;
 
         foreach (Boid neighbor in neighborsInSight)
         {
@@ -230,7 +278,7 @@ public class Boid : MonoBehaviour
     }
 
     // Keep a minimum distance from other nearby boids to avoid crowding
-    Vector3 Separation()
+    private Vector3 Separation()
     {
         Vector3 separationForce = Vector3.zero;
 
@@ -249,13 +297,13 @@ public class Boid : MonoBehaviour
     }
 
     // Align the boid's velocity with the average velocity of nearby boids
-    Vector3 Alignment()
+    private Vector3 Alignment()
     {
         Vector3 averageVelocity = Vector3.zero;
 
         foreach (Boid neighbor in neighborsInSight)
         {
-            averageVelocity += neighbor.agent.velocity;
+            averageVelocity += neighbor.velocity;
         }
 
         if (neighborsInSight.Count > 0)
@@ -268,14 +316,13 @@ public class Boid : MonoBehaviour
     }
 
     // Helper function to steer the boid towards a target position
-    Vector3 Seek(Vector3 targetPosition)
+    private Vector3 Seek(Vector3 targetPosition)
     {
         Vector3 desiredVelocity = targetPosition - transform.position;
         desiredVelocity = desiredVelocity.normalized * maxSpeed;
-
-        return desiredVelocity - agent.velocity;
+        desiredVelocity -= velocity;
+        return desiredVelocity;
     }
-
 
     private List<Vector2> LookAround(UnityAction<Vector2, float> callback)
     {
@@ -343,6 +390,7 @@ public class Boid : MonoBehaviour
         Vector3 bestDir = transform.forward;
         float furthestUnobstructedDst = 0;
         RaycastHit hit;
+        float debugAlpha = 0.01f;
 
         List<Vector2> rayDirections = LookAround(null);
 
@@ -350,24 +398,25 @@ public class Boid : MonoBehaviour
         {
             // tranform form local to world space so that smaller dir changes are examined first
             Vector3 dir = transform.TransformDirection(rayDirections[i].ToVector3XZ());
+            dir.Normalize();
             if (Physics.SphereCast(transform.position, viewSphereCastRadius, dir, out hit, viewRadius, obstacleMask, QueryTriggerInteraction.Ignore))
             {
                 if (hit.distance > furthestUnobstructedDst)
                 {
                     bestDir = dir;
                     furthestUnobstructedDst = hit.distance;
-                    Debug.DrawRay(transform.position, bestDir, Color.red, 1f);
+                    Debug.DrawRay(transform.position, bestDir, Color.red.ToWithA(debugAlpha), 1f);
                 }
             }
             else
             {
                 // no obstacle in view radius, so return this direction
-                Debug.DrawRay(transform.position, bestDir, Color.green, 1f);
+                Debug.DrawRay(transform.position, bestDir, Color.green.ToWithA(debugAlpha), 1f);
                 return dir;
             }
         }
         // obstacles all around, so return dir where obstacle is furthest away
-        Debug.DrawRay(transform.position, bestDir, Color.blue, 1f);
+        Debug.DrawRay(transform.position, bestDir, Color.blue.ToWithA(debugAlpha), 1f);
         return bestDir;
     }
 }

@@ -244,6 +244,7 @@ GameObject:
   - component: {fileID: 796526583}
   - component: {fileID: 140169017433082388}
   - component: {fileID: 6761795679835147146}
+  - component: {fileID: 8661230859470424753}
   m_Layer: 0
   m_Name: Zombie
   m_TagString: Untagged
@@ -283,14 +284,21 @@ MonoBehaviour:
   cohesionWeight: 0.16
   separationWeight: 0.5
   alignmentWeight: 0.36
-  maxSpeed: 2
-  maxForce: 1
-  viewRadius: 5
+  forwardWeight: 1
+  maxSpeed: 3
+  maxForce: 3
+  viewRadius: 8
   viewAngle: 270
   obstacleMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 8
   viewSphereCastRadius: 0.3
+  randomiseStartPosition: 0
+  cohesion: {x: 0, y: 0, z: 0}
+  separation: {x: 0, y: 0, z: 0}
+  alignment: {x: 0, y: 0, z: 0}
+  forwardDirection: {x: 0, y: 0, z: 0}
+  velocity: {x: 0, y: 0, z: 0}
 --- !u!136 &796526583
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -316,7 +324,7 @@ SphereCollider:
   m_IsTrigger: 1
   m_Enabled: 1
   serializedVersion: 2
-  m_Radius: 5
+  m_Radius: 8
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!195 &6761795679835147146
 NavMeshAgent:
@@ -328,7 +336,7 @@ NavMeshAgent:
   m_Enabled: 1
   m_AgentTypeID: 0
   m_Radius: 0.4
-  m_Speed: 3.5
+  m_Speed: 3
   m_Acceleration: 8
   avoidancePriority: 50
   m_AngularSpeed: 120
@@ -340,6 +348,22 @@ NavMeshAgent:
   m_BaseOffset: 0
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!54 &8661230859470424753
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5778765789642689989}
+  serializedVersion: 2
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0
+  m_UseGravity: 0
+  m_IsKinematic: 1
+  m_Interpolate: 0
+  m_Constraints: 80
+  m_CollisionDetection: 1
 --- !u!1 &5778765790206372193
 GameObject:
   m_ObjectHideFlags: 0
