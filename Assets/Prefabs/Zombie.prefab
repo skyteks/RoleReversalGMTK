@@ -280,6 +280,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 56692eab945d0704e975444c8b8e8bd6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  cohesionWeight: 0.16
+  separationWeight: 0.5
+  alignmentWeight: 0.36
+  maxSpeed: 2
+  maxForce: 1
   viewRadius: 5
   viewAngle: 270
   obstacleMask:
@@ -308,7 +313,7 @@ SphereCollider:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5778765789642689989}
   m_Material: {fileID: 0}
-  m_IsTrigger: 0
+  m_IsTrigger: 1
   m_Enabled: 1
   serializedVersion: 2
   m_Radius: 5

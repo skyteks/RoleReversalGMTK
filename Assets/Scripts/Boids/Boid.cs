@@ -10,9 +10,16 @@ using UnityEditor;
 
 public class Boid : MonoBehaviour
 {
-    public static bool useSeperationRule;
-    public static bool useAllignmentRule;
-    public static bool useCohesionRule;
+    [SerializeField]
+    private float cohesionWeight = 0.16f; // Weight for cohesion behavior
+    [SerializeField]
+    private float separationWeight = 0.5f; // Weight for separation behavior
+    [SerializeField]
+    private float alignmentWeight = 0.36f; // Weight for alignment behavior
+    [SerializeField]
+    private float maxSpeed = 2f; // Maximum speed of the boids
+    [SerializeField]
+    private float maxForce = 1f;
 
     [SerializeField]
     [Range(0f, 20f)]
@@ -26,7 +33,7 @@ public class Boid : MonoBehaviour
     private float viewSphereCastRadius = 0.1f;
 
     private SphereCollider visionTrigger;
-    private List<Boid> boidsInSight;
+    private List<Boid> neighborsInSight = new();
 
     private NavMeshAgent agent;
 
@@ -63,13 +70,12 @@ public class Boid : MonoBehaviour
 
     private void DebugDrawConnections()
     {
-        if (viewAngle > 0f && viewRadius > 0f && boidsInSight != null)
+        if (viewAngle > 0f && viewRadius > 0f && neighborsInSight != null)
         {
             if (Application.isEditor && !Application.isPlaying)
             {
                 visionTrigger = visionTrigger != null ? visionTrigger : GetComponent<SphereCollider>();
-                boidsInSight ??= new List<Boid>();
-                boidsInSight.Clear();
+                neighborsInSight.Clear();
                 Collider[] others = Physics.OverlapSphere(transform.TransformPoint(visionTrigger.center), viewRadius, new LayerMask().ToEverything(), QueryTriggerInteraction.Ignore);
                 foreach (var other in others)
                 {
@@ -78,7 +84,7 @@ public class Boid : MonoBehaviour
             }
 
             Handles.color = Color.red;
-            foreach (var other in boidsInSight)
+            foreach (var other in neighborsInSight)
             {
                 Vector3 vector = other.transform.position - transform.position;
                 float angle = Vector3.SignedAngle(transform.forward, vector, Vector3.up);
@@ -93,7 +99,7 @@ public class Boid : MonoBehaviour
 
     private void DebugDrawDirections()
     {
-        if (boidsInSight == null)
+        if (neighborsInSight == null)
         {
             return;
         }
@@ -101,7 +107,7 @@ public class Boid : MonoBehaviour
         Handles.color = Color.green;
         Handles.DrawLine(transform.position, transform.position + transform.forward * lenght);
         Handles.color = Color.blue;
-        foreach (var other in boidsInSight)
+        foreach (var other in neighborsInSight)
         {
             Handles.DrawLine(other.transform.position, other.transform.position + transform.forward * lenght);
         }
@@ -133,10 +139,31 @@ public class Boid : MonoBehaviour
 
     void Update()
     {
+        /*
         Vector3 direction = FindUnobstructedDirection();
 
         agent.Move(direction * Time.deltaTime);
         transform.LookAt(transform.position + direction, Vector3.up);
+        */
+
+        // Calculate the combined steering force from cohesion, separation, and alignment
+        Vector3 steeringForce = Vector3.zero;
+
+        Vector3 cohesion = Cohesion();
+        Vector3 separation = Separation();
+        Vector3 alignment = Alignment();
+        steeringForce += cohesion * cohesionWeight;
+        steeringForce += separation * separationWeight;
+        steeringForce += alignment * alignmentWeight;
+
+        // Limit the steering force to the maximum force
+        steeringForce = Vector3.ClampMagnitude(steeringForce, maxForce);
+
+        // Apply the steering force to the zombie's position using agent.Move()
+        Vector3 desiredVelocity = agent.velocity + steeringForce * Time.deltaTime;
+        desiredVelocity = Vector3.ClampMagnitude(desiredVelocity, maxSpeed);
+        Vector3 deltaPosition = desiredVelocity * Time.deltaTime;
+        agent.Move(deltaPosition);
     }
 
     void OnTriggerEnter(Collider other)
@@ -159,10 +186,12 @@ public class Boid : MonoBehaviour
             return;
         }
 
-        if (!boidsInSight.Contains(neighbor))
+        if (neighborsInSight.Contains(neighbor))
         {
-            boidsInSight.Add(neighbor);
+            return;
         }
+
+        neighborsInSight.Add(neighbor);
     }
 
     void OnTriggerExit(Collider other)
@@ -178,8 +207,75 @@ public class Boid : MonoBehaviour
             return;
         }
 
-        boidsInSight.Remove(neighbor);
+        neighborsInSight.Remove(neighbor);
     }
+
+    // Calculate the average position of nearby boids and steer towards it
+    Vector3 Cohesion()
+    {
+        Vector3 centerOfMass = Vector3.zero;
+
+        foreach (Boid neighbor in neighborsInSight)
+        {
+            centerOfMass += neighbor.transform.position;
+        }
+
+        if (neighborsInSight.Count > 0)
+        {
+            centerOfMass /= neighborsInSight.Count;
+            return Seek(centerOfMass);
+        }
+
+        return Vector3.zero;
+    }
+
+    // Keep a minimum distance from other nearby boids to avoid crowding
+    Vector3 Separation()
+    {
+        Vector3 separationForce = Vector3.zero;
+
+        foreach (Boid neighbor in neighborsInSight)
+        {
+            Vector3 separationVector = transform.position - neighbor.transform.position;
+            float distance = separationVector.magnitude;
+
+            if (distance > 0f)  // Avoid division by zero
+            {
+                separationForce += separationVector.normalized / distance;
+            }
+        }
+
+        return separationForce;
+    }
+
+    // Align the boid's velocity with the average velocity of nearby boids
+    Vector3 Alignment()
+    {
+        Vector3 averageVelocity = Vector3.zero;
+
+        foreach (Boid neighbor in neighborsInSight)
+        {
+            averageVelocity += neighbor.agent.velocity;
+        }
+
+        if (neighborsInSight.Count > 0)
+        {
+            averageVelocity /= neighborsInSight.Count;
+            return averageVelocity.normalized;
+        }
+
+        return Vector3.zero;
+    }
+
+    // Helper function to steer the boid towards a target position
+    Vector3 Seek(Vector3 targetPosition)
+    {
+        Vector3 desiredVelocity = targetPosition - transform.position;
+        desiredVelocity = desiredVelocity.normalized * maxSpeed;
+
+        return desiredVelocity - agent.velocity;
+    }
+
 
     private List<Vector2> LookAround(UnityAction<Vector2, float> callback)
     {
