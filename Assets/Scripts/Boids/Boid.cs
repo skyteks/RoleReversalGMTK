@@ -24,11 +24,11 @@ public class Boid : MonoBehaviour
 
     [Space]
 
-    [SerializeField]
-    [Range(0f, 20f)]
-    private float viewRadius = 10f;
-    [SerializeField]
-    [Range(0f, 360f)]
+    [SerializeField, Range(0f, 20f)]
+    private float cohesionRadius = 8f;
+    [SerializeField, Range(0f, 20f)]
+    private float seperationRadius = 2.5f;
+    [SerializeField, Range(0f, 360f)]
     private float viewAngle = 270f;
     [SerializeField]
     private LayerMask obstacleMask = new LayerMask().ToEverything();
@@ -50,13 +50,17 @@ public class Boid : MonoBehaviour
     private Vector3 forwardDirection;
 
     private List<Boid> neighborsInSight = new();
+    private List<Boid> neighborsToSeperate = new();
     private Vector3 centerOfMass;
     private Vector3 lastFramePosition;
     private float lastDeltaTime = float.PositiveInfinity;
     [SerializeField, ReadOnly]
     private Vector3 velocity;
 
-    private SphereCollider visionTrigger;
+    [SerializeField]
+    private TriggerEventListener cohesionTrigger;
+    [SerializeField]
+    private TriggerEventListener seperationTrigger;
     private NavMeshAgent agent;
 
 #if UNITY_EDITOR
@@ -71,41 +75,35 @@ public class Boid : MonoBehaviour
 
     private void DebugDrawVision()
     {
-        if (viewAngle > 0f && viewRadius > 0f)
+        if (cohesionRadius > 0f)
         {
             Vector3 startVector = Quaternion.Euler(0f, -viewAngle * 0.5f, 0f) * transform.forward;
 
-            Color color = Color.gray;
-            color.a = 0.15f;
-            Handles.color = color;
-            Handles.DrawSolidArc(transform.position, Vector3.up, startVector, viewAngle, viewRadius);
+            Handles.color = Color.gray.ToWithA(0.15f);
+            Handles.DrawSolidArc(transform.position, Vector3.up, startVector, viewAngle, cohesionRadius);
 
             Handles.color = Color.yellow;
-            //Handles.DrawWireArc(transform.position, Vector3.up, startVector, viewAngle, viewRadius);
+            Handles.DrawWireArc(transform.position, Vector3.up, startVector, viewAngle, cohesionRadius);
+            Handles.color = Handles.color.ToWithA(0.15f);
+            Handles.DrawWireArc(transform.position, Vector3.up, startVector, -(360f - viewAngle), cohesionRadius);
             if (viewAngle < 360f)
             {
                 Vector3 endVector = Quaternion.Euler(0f, viewAngle * 0.5f, 0f) * transform.forward;
-                Vector3[] vectors = new Vector3[] { transform.position + startVector * viewRadius, transform.position, transform.position + endVector * viewRadius };
-                //Handles.DrawLines(vectors, new int[] { 0, 1, 1, 2 });
+                Vector3[] vectors = new Vector3[] { transform.position + startVector * cohesionRadius, transform.position, transform.position + endVector * cohesionRadius };
+                Handles.DrawLines(vectors, new int[] { 0, 1, 1, 2 });
             }
+        }
+        if(seperationRadius > 0f)
+        {
+            Handles.color = Color.red;
+            Handles.DrawWireArc(transform.position, Vector3.up, transform.forward, 360f, seperationRadius);
         }
     }
 
     private void DebugDrawConnections()
     {
-        if (viewAngle > 0f && viewRadius > 0f && neighborsInSight != null)
+        if (viewAngle > 0f && cohesionRadius > 0f && neighborsInSight != null)
         {
-            if (Application.isEditor && !Application.isPlaying)
-            {
-                visionTrigger = visionTrigger != null ? visionTrigger : GetComponent<SphereCollider>();
-                neighborsInSight.Clear();
-                Collider[] others = Physics.OverlapSphere(transform.TransformPoint(visionTrigger.center), viewRadius, new LayerMask().ToEverything(), QueryTriggerInteraction.Ignore);
-                foreach (var other in others)
-                {
-                    OnTriggerEnter(other);
-                }
-            }
-
             Handles.color = Color.red;
             foreach (var other in neighborsInSight)
             {
@@ -155,16 +153,32 @@ public class Boid : MonoBehaviour
 
 #endif
 
+    #region Unity Callsbacks
     void OnValidate()
     {
         Awake();
-        visionTrigger.radius = viewRadius;
+        cohesionTrigger.radius = cohesionRadius;
     }
 
     void Awake()
     {
-        visionTrigger = GetComponent<SphereCollider>();
         agent = GetComponent<NavMeshAgent>();
+    }
+
+    void OnEnable()
+    {
+        cohesionTrigger.onEnter += OnEnterCohesion;
+        cohesionTrigger.onExit += OnExitCohesion;
+        seperationTrigger.onEnter += OnEnterSeperation;
+        seperationTrigger.onExit += OnExitSeperation;
+    }
+
+    void OnDisable()
+    {
+        cohesionTrigger.onEnter -= OnEnterCohesion;
+        cohesionTrigger.onExit -= OnExitCohesion;
+        seperationTrigger.onEnter -= OnEnterSeperation;
+        seperationTrigger.onExit -= OnExitSeperation;
     }
 
     void Start()
@@ -209,20 +223,13 @@ public class Boid : MonoBehaviour
             transform.forward = velocity.normalized;
         }
     }
+    #endregion
 
-    void OnTriggerEnter(Collider other)
+    #region Callbacks
+    void OnEnterCohesion(Boid neighbor)
     {
-        if (other.isTrigger)
-        {
-            return;
-        }
-
-        if (!other.gameObject.TryGetComponent<Boid>(out Boid neighbor) || neighbor == this)
-        {
-            return;
-        }
-
-        Vector3 vector = other.transform.position - transform.position;
+        /// TODO: check object angle all the time, not just on Enter
+        Vector3 vector = neighbor.transform.position - transform.position;
         float angle = Vector3.SignedAngle(transform.forward, vector, Vector3.up);
         if (Mathf.Abs(angle) >= viewAngle * 0.5f)
         {
@@ -237,20 +244,26 @@ public class Boid : MonoBehaviour
         neighborsInSight.Add(neighbor);
     }
 
-    void OnTriggerExit(Collider other)
+    void OnExitCohesion(Boid neighbor)
     {
-        if (other.isTrigger)
-        {
-            return;
-        }
-
-        if (!other.gameObject.TryGetComponent<Boid>(out Boid neighbor) || neighbor == this)
-        {
-            return;
-        }
-
         neighborsInSight.Remove(neighbor);
     }
+
+    void OnEnterSeperation(Boid neighbor)
+    {
+        if (neighborsToSeperate.Contains(neighbor))
+        {
+            return;
+        }
+
+        neighborsToSeperate.Add(neighbor);
+    }
+
+    void OnExitSeperation(Boid neighbor)
+    {
+        neighborsToSeperate.Remove(neighbor);
+    }
+    #endregion
 
     [ContextMenu("Ramdonize Rotation")]
     private void RandomizeRotation()
@@ -282,7 +295,7 @@ public class Boid : MonoBehaviour
     {
         Vector3 separationForce = Vector3.zero;
 
-        foreach (Boid neighbor in neighborsInSight)
+        foreach (Boid neighbor in neighborsToSeperate)
         {
             Vector3 separationVector = transform.position - neighbor.transform.position;
             float distance = separationVector.magnitude;
@@ -338,7 +351,7 @@ public class Boid : MonoBehaviour
 
             float x = (angle * i).Sin();
             float y = (angle * i).Cos();
-            Vector2 vector = new Vector2(x, y) * viewRadius;
+            Vector2 vector = new Vector2(x, y) * cohesionRadius;
 
             float lerpT = i / (float)(numPoints / 2);
             //float lerpT = Vector2.Distance(Vector2.up * viewRadius, vector) / viewRadius * 0.5f;
@@ -351,7 +364,7 @@ public class Boid : MonoBehaviour
             {
                 x = (angle * -i).Sin();
                 y = (angle * -i).Cos();
-                vector = new Vector2(x, y) * viewRadius;
+                vector = new Vector2(x, y) * cohesionRadius;
 
                 callback?.Invoke(vector, lerpT);
                 directions.Add(vector);
@@ -399,7 +412,7 @@ public class Boid : MonoBehaviour
             // tranform form local to world space so that smaller dir changes are examined first
             Vector3 dir = transform.TransformDirection(rayDirections[i].ToVector3XZ());
             dir.Normalize();
-            if (Physics.SphereCast(transform.position, viewSphereCastRadius, dir, out hit, viewRadius, obstacleMask, QueryTriggerInteraction.Ignore))
+            if (Physics.SphereCast(transform.position, viewSphereCastRadius, dir, out hit, cohesionRadius, obstacleMask, QueryTriggerInteraction.Ignore))
             {
                 if (hit.distance > furthestUnobstructedDst)
                 {
