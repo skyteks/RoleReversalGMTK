@@ -12,9 +12,9 @@ public class Boid : MonoBehaviour
     [SerializeField]
     private float cohesionWeight = 0.16f; // Weight for cohesion behavior
     [SerializeField]
-    private float separationWeight = 0.5f; // Weight for separation behavior
-    [SerializeField]
     private float alignmentWeight = 0.36f; // Weight for alignment behavior
+    [SerializeField]
+    private float separationWeight = 0.5f; // Weight for separation behavior
     [SerializeField]
     private float forwardWeight = 1f; // Weight for alignment behavior
     [SerializeField]
@@ -27,9 +27,15 @@ public class Boid : MonoBehaviour
     [SerializeField, Range(0f, 20f)]
     private float cohesionRadius = 8f;
     [SerializeField, Range(0f, 20f)]
+    private float alignmentRadius = 5.5f;
+    [SerializeField, Range(0f, 20f)]
     private float seperationRadius = 2.5f;
-    [SerializeField, Range(0f, 360f)]
-    private float viewAngle = 270f;
+
+    //[SerializeField, Range(0f, 360f)]
+    private float cohesionAngle = 360f;
+    //[SerializeField, Range(0f, 360f)]
+    private float alignmentAngle = 360f;
+
     [SerializeField]
     private LayerMask obstacleMask = new LayerMask().ToEverything();
     [SerializeField]
@@ -43,13 +49,14 @@ public class Boid : MonoBehaviour
     [SerializeField, ReadOnly]
     private Vector3 cohesion;
     [SerializeField, ReadOnly]
-    private Vector3 separation;
-    [SerializeField, ReadOnly]
     private Vector3 alignment;
+    [SerializeField, ReadOnly]
+    private Vector3 separation;
     [SerializeField, ReadOnly]
     private Vector3 forwardDirection;
 
-    private List<Boid> neighborsInSight = new();
+    private List<Boid> neighborsToCohese = new();
+    private List<Boid> neighborsToAllign = new();
     private List<Boid> neighborsToSeperate = new();
     private Vector3 centerOfMass;
     private Vector3 lastFramePosition;
@@ -60,56 +67,58 @@ public class Boid : MonoBehaviour
     [SerializeField]
     private TriggerEventListener cohesionTrigger;
     [SerializeField]
+    private TriggerEventListener alignmentTrigger;
+    [SerializeField]
     private TriggerEventListener seperationTrigger;
     private NavMeshAgent agent;
+
+    private const float debugLineThickness = 4f;
 
 #if UNITY_EDITOR
     void OnDrawGizmosSelected()
     {
-        DebugDrawVision();
+        DebugDrawRadius(cohesionRadius, Color.cyan, cohesionAngle);
+        DebugDrawRadius(alignmentRadius, Color.yellow, alignmentAngle);
+        DebugDrawRadius(seperationRadius, Color.red);
         //DebugDrawConnections();
         //DebugDrawDirections();
         //LookAround(DebugDrawLookPoints);
         DebugDrawCenterOfMass();
     }
 
-    private void DebugDrawVision()
+    private void DebugDrawRadius(float radius, Color outlineColor, float angle = 360f)
     {
-        if (cohesionRadius > 0f)
+        if (radius > 0f)
         {
-            Vector3 startVector = Quaternion.Euler(0f, -viewAngle * 0.5f, 0f) * transform.forward;
+            Handles.color = outlineColor;
 
-            Handles.color = Color.gray.ToWithA(0.15f);
-            Handles.DrawSolidArc(transform.position, Vector3.up, startVector, viewAngle, cohesionRadius);
-
-            Handles.color = Color.yellow;
-            Handles.DrawWireArc(transform.position, Vector3.up, startVector, viewAngle, cohesionRadius);
-            Handles.color = Handles.color.ToWithA(0.15f);
-            Handles.DrawWireArc(transform.position, Vector3.up, startVector, -(360f - viewAngle), cohesionRadius);
-            if (viewAngle < 360f)
+            Vector3 startVector = transform.forward;
+            if (angle < 360f)
             {
-                Vector3 endVector = Quaternion.Euler(0f, viewAngle * 0.5f, 0f) * transform.forward;
-                Vector3[] vectors = new Vector3[] { transform.position + startVector * cohesionRadius, transform.position, transform.position + endVector * cohesionRadius };
-                Handles.DrawLines(vectors, new int[] { 0, 1, 1, 2 });
+                startVector = Quaternion.Euler(0f, -angle * 0.5f, 0f) * startVector;
+
+                Vector3 endVector = Quaternion.Euler(0f, angle * 0.5f, 0f) * transform.forward;
+                Vector3[] vectors = new Vector3[] { transform.position + startVector * radius, transform.position, transform.position, transform.position + endVector * radius };
+                Handles.DrawAAPolyLine(debugLineThickness, vectors);
             }
-        }
-        if(seperationRadius > 0f)
-        {
-            Handles.color = Color.red;
-            Handles.DrawWireArc(transform.position, Vector3.up, transform.forward, 360f, seperationRadius);
+
+            Handles.DrawWireArc(transform.position, Vector3.up, startVector, angle, radius, debugLineThickness);
+
+            //Handles.color = Handles.color.ToWithA(0.15f);
+            //Handles.DrawWireArc(transform.position, Vector3.up, startVector, (360f - angle) * -1f, radius, debugLineThickness);
         }
     }
 
     private void DebugDrawConnections()
     {
-        if (viewAngle > 0f && cohesionRadius > 0f && neighborsInSight != null)
+        if (alignmentAngle > 0f && cohesionRadius > 0f && neighborsToAllign != null)
         {
             Handles.color = Color.red;
-            foreach (var other in neighborsInSight)
+            foreach (var other in neighborsToAllign)
             {
                 Vector3 vector = other.transform.position - transform.position;
                 float angle = Vector3.SignedAngle(transform.forward, vector, Vector3.up);
-                if (Mathf.Abs(angle) >= viewAngle * 0.5f)
+                if (Mathf.Abs(angle) >= alignmentAngle * 0.5f)
                 {
                     continue;
                 }
@@ -120,7 +129,7 @@ public class Boid : MonoBehaviour
 
     private void DebugDrawDirections()
     {
-        if (neighborsInSight == null)
+        if (neighborsToAllign == null)
         {
             return;
         }
@@ -128,7 +137,7 @@ public class Boid : MonoBehaviour
         Handles.color = Color.green;
         Handles.DrawLine(transform.position, transform.position + transform.forward * lenght);
         Handles.color = Color.blue;
-        foreach (var other in neighborsInSight)
+        foreach (var other in neighborsToAllign)
         {
             Handles.DrawLine(other.transform.position, other.transform.position + transform.forward * lenght);
         }
@@ -142,7 +151,7 @@ public class Boid : MonoBehaviour
 
     private void DebugDrawCenterOfMass()
     {
-        if (neighborsInSight.Count == 0)
+        if (neighborsToAllign.Count == 0)
         {
             return;
         }
@@ -169,6 +178,8 @@ public class Boid : MonoBehaviour
     {
         cohesionTrigger.onEnter += OnEnterCohesion;
         cohesionTrigger.onExit += OnExitCohesion;
+        alignmentTrigger.onEnter += OnEnterAlignment;
+        alignmentTrigger.onExit += OnExitAlignment;
         seperationTrigger.onEnter += OnEnterSeperation;
         seperationTrigger.onExit += OnExitSeperation;
     }
@@ -177,6 +188,8 @@ public class Boid : MonoBehaviour
     {
         cohesionTrigger.onEnter -= OnEnterCohesion;
         cohesionTrigger.onExit -= OnExitCohesion;
+        alignmentTrigger.onEnter -= OnEnterAlignment;
+        alignmentTrigger.onExit -= OnExitAlignment;
         seperationTrigger.onEnter -= OnEnterSeperation;
         seperationTrigger.onExit -= OnExitSeperation;
     }
@@ -212,7 +225,6 @@ public class Boid : MonoBehaviour
         // Limit the steering force to the maximum force
         steeringForce = Vector3.ClampMagnitude(steeringForce, maxForce);
 
-
         // Apply the steering force to the zombie's position using agent.Move()
         Vector3 desiredVelocity = velocity + steeringForce * Time.deltaTime;
         desiredVelocity = Vector3.ClampMagnitude(desiredVelocity, maxSpeed);
@@ -229,24 +241,51 @@ public class Boid : MonoBehaviour
     void OnEnterCohesion(Boid neighbor)
     {
         /// TODO: check object angle all the time, not just on Enter
+        /*
         Vector3 vector = neighbor.transform.position - transform.position;
         float angle = Vector3.SignedAngle(transform.forward, vector, Vector3.up);
-        if (Mathf.Abs(angle) >= viewAngle * 0.5f)
+        if (Mathf.Abs(angle) >= cohesionAngle * 0.5f)
+        {
+            return;
+        }
+        */
+
+        if (neighborsToCohese.Contains(neighbor))
         {
             return;
         }
 
-        if (neighborsInSight.Contains(neighbor))
-        {
-            return;
-        }
-
-        neighborsInSight.Add(neighbor);
+        neighborsToCohese.Add(neighbor);
     }
 
     void OnExitCohesion(Boid neighbor)
     {
-        neighborsInSight.Remove(neighbor);
+        neighborsToCohese.Remove(neighbor);
+    }
+
+    void OnEnterAlignment(Boid neighbor)
+    {
+        /// TODO: check object angle all the time, not just on Enter
+        /*
+        Vector3 vector = neighbor.transform.position - transform.position;
+        float angle = Vector3.SignedAngle(transform.forward, vector, Vector3.up);
+        if (Mathf.Abs(angle) >= alignmentAngle * 0.5f)
+        {
+            return;
+        }
+        */
+
+        if (neighborsToAllign.Contains(neighbor))
+        {
+            return;
+        }
+
+        neighborsToAllign.Add(neighbor);
+    }
+
+    void OnExitAlignment(Boid neighbor)
+    {
+        neighborsToAllign.Remove(neighbor);
     }
 
     void OnEnterSeperation(Boid neighbor)
@@ -276,15 +315,34 @@ public class Boid : MonoBehaviour
     {
         centerOfMass = Vector3.zero;
 
-        foreach (Boid neighbor in neighborsInSight)
+        foreach (Boid neighbor in neighborsToCohese)
         {
             centerOfMass += neighbor.transform.position;
         }
 
-        if (neighborsInSight.Count > 0)
+        if (neighborsToCohese.Count > 0)
         {
-            centerOfMass /= neighborsInSight.Count;
+            centerOfMass /= neighborsToCohese.Count;
             return Seek(centerOfMass);
+        }
+
+        return Vector3.zero;
+    }
+
+    // Align the boid's velocity with the average velocity of nearby boids
+    private Vector3 Alignment()
+    {
+        Vector3 averageVelocity = Vector3.zero;
+
+        foreach (Boid neighbor in neighborsToAllign)
+        {
+            averageVelocity += neighbor.velocity;
+        }
+
+        if (neighborsToAllign.Count > 0)
+        {
+            averageVelocity /= neighborsToAllign.Count;
+            return averageVelocity.normalized;
         }
 
         return Vector3.zero;
@@ -309,25 +367,6 @@ public class Boid : MonoBehaviour
         return separationForce;
     }
 
-    // Align the boid's velocity with the average velocity of nearby boids
-    private Vector3 Alignment()
-    {
-        Vector3 averageVelocity = Vector3.zero;
-
-        foreach (Boid neighbor in neighborsInSight)
-        {
-            averageVelocity += neighbor.velocity;
-        }
-
-        if (neighborsInSight.Count > 0)
-        {
-            averageVelocity /= neighborsInSight.Count;
-            return averageVelocity.normalized;
-        }
-
-        return Vector3.zero;
-    }
-
     // Helper function to steer the boid towards a target position
     private Vector3 Seek(Vector3 targetPosition)
     {
@@ -344,7 +383,7 @@ public class Boid : MonoBehaviour
         List<Vector2> directions = new();
         for (int i = 0; i < numPoints / 2; i++)
         {
-            if (Mathf.Abs((angle * i) - 180f) < ((360f - viewAngle) * 0.5f))
+            if (Mathf.Abs((angle * i) - 180f) < ((360f - alignmentAngle) * 0.5f))
             {
                 continue;
             }
