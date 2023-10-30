@@ -16,7 +16,7 @@ public class Boid : MonoBehaviour
     [SerializeField]
     private float separationWeight = 0.5f; // Weight for separation behavior
     [SerializeField]
-    private float forwardWeight = 1f; // Weight for alignment behavior
+    private float avoidanceWeight = 1f; // Weight for alignment behavior
     [SerializeField]
     private float maxSpeed = 2f; // Maximum speed of the boids
     [SerializeField]
@@ -52,8 +52,6 @@ public class Boid : MonoBehaviour
     private Vector3 alignment;
     [SerializeField, ReadOnly]
     private Vector3 separation;
-    [SerializeField, ReadOnly]
-    private Vector3 forwardDirection;
 
     private List<Boid> neighborsToCohese = new();
     private List<Boid> neighborsToAllign = new();
@@ -159,19 +157,18 @@ public class Boid : MonoBehaviour
         Handles.color = Color.black;
         Handles.DrawSolidDisc(centerOfMass, Vector3.up, 0.2f);
     }
-
 #endif
 
     #region Unity Callsbacks
+    void Awake()
+    {
+        agent = GetComponent<NavMeshAgent>();
+    }
+
     void OnValidate()
     {
         Awake();
         cohesionTrigger.radius = cohesionRadius;
-    }
-
-    void Awake()
-    {
-        agent = GetComponent<NavMeshAgent>();
     }
 
     void OnEnable()
@@ -210,17 +207,17 @@ public class Boid : MonoBehaviour
         lastFramePosition = transform.position;
 
         // Calculate the combined steering force from cohesion, separation, and alignment
-        Vector3 steeringForce = Vector3.zero;
 
         cohesion = Cohesion();
         separation = Separation();
         alignment = Alignment();
-        forwardDirection = FindUnobstructedDirection();
+        Vector3 steeringForce = Vector3.zero;
+        steeringForce = ObstacleDetection();//FindUnobstructedDirection();
         steeringForce += cohesion * cohesionWeight;
         steeringForce += separation * separationWeight;
         steeringForce += alignment * alignmentWeight;
 
-        steeringForce += forwardDirection * forwardWeight;
+        //steeringForce += forwardDirection * forwardWeight;
 
         // Limit the steering force to the maximum force
         steeringForce = Vector3.ClampMagnitude(steeringForce, maxForce);
@@ -376,6 +373,65 @@ public class Boid : MonoBehaviour
         return desiredVelocity;
     }
 
+    private Vector3 ObstacleDetection()
+    {
+        const int rays = 8;
+
+        Vector3 vector = Vector3.zero;
+        for (int i = 0; i < rays; i++)
+        {
+            float angle = i * (360f / rays);
+
+            Ray ray = new Ray(transform.position, Quaternion.Euler(Vector3.up * angle) * Vector3.forward);
+            if (Physics.Raycast(ray, out RaycastHit hit, cohesionRadius, obstacleMask, QueryTriggerInteraction.Ignore))
+            {
+                Debug.DrawLine(ray.origin, hit.point, Color.red);
+
+                vector += -1f * (ray.direction.magnitude / cohesionRadius) * ray.direction.normalized;
+            }
+            else
+            {
+                Debug.DrawRay(ray.origin, ray.direction * cohesionRadius, Color.blue);
+            }
+        }
+        return vector;
+    }
+
+    private Vector3 FindUnobstructedDirection()
+    {
+        Vector3 bestDir = transform.forward;
+        float furthestUnobstructedDst = 0;
+        RaycastHit hit;
+        float debugAlpha = 0.01f;
+
+        List<Vector2> rayDirections = LookAround(null);
+
+        for (int i = 0; i < rayDirections.Count; i++)
+        {
+            // tranform form local to world space so that smaller dir changes are examined first
+            Vector3 dir = transform.TransformDirection(rayDirections[i].ToVector3XZ());
+            dir.Normalize();
+            if (Physics.SphereCast(transform.position, viewSphereCastRadius, dir, out hit, cohesionRadius, obstacleMask, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.distance > furthestUnobstructedDst)
+                {
+                    bestDir = dir;
+                    furthestUnobstructedDst = hit.distance;
+                    Debug.DrawRay(transform.position, bestDir, Color.red.ToWithA(debugAlpha), 1f);
+                }
+            }
+            else
+            {
+                // no obstacle in view radius, so return this direction
+                Debug.DrawRay(transform.position, bestDir, Color.green.ToWithA(debugAlpha), 1f);
+                return dir;
+            }
+        }
+        // obstacles all around, so return dir where obstacle is furthest away
+        Debug.DrawRay(transform.position, bestDir, Color.blue.ToWithA(debugAlpha), 1f);
+        return bestDir;
+    }
+
     private List<Vector2> LookAround(UnityAction<Vector2, float> callback)
     {
         int numPoints = 360;
@@ -436,39 +492,4 @@ public class Boid : MonoBehaviour
         }
     }
     */
-
-    private Vector3 FindUnobstructedDirection()
-    {
-        Vector3 bestDir = transform.forward;
-        float furthestUnobstructedDst = 0;
-        RaycastHit hit;
-        float debugAlpha = 0.01f;
-
-        List<Vector2> rayDirections = LookAround(null);
-
-        for (int i = 0; i < rayDirections.Count; i++)
-        {
-            // tranform form local to world space so that smaller dir changes are examined first
-            Vector3 dir = transform.TransformDirection(rayDirections[i].ToVector3XZ());
-            dir.Normalize();
-            if (Physics.SphereCast(transform.position, viewSphereCastRadius, dir, out hit, cohesionRadius, obstacleMask, QueryTriggerInteraction.Ignore))
-            {
-                if (hit.distance > furthestUnobstructedDst)
-                {
-                    bestDir = dir;
-                    furthestUnobstructedDst = hit.distance;
-                    Debug.DrawRay(transform.position, bestDir, Color.red.ToWithA(debugAlpha), 1f);
-                }
-            }
-            else
-            {
-                // no obstacle in view radius, so return this direction
-                Debug.DrawRay(transform.position, bestDir, Color.green.ToWithA(debugAlpha), 1f);
-                return dir;
-            }
-        }
-        // obstacles all around, so return dir where obstacle is furthest away
-        Debug.DrawRay(transform.position, bestDir, Color.blue.ToWithA(debugAlpha), 1f);
-        return bestDir;
-    }
 }

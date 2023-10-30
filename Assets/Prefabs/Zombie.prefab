@@ -484,7 +484,7 @@ MonoBehaviour:
   cohesionWeight: 0.16
   alignmentWeight: 0.36
   separationWeight: 0.5
-  forwardWeight: 1
+  avoidanceWeight: 30
   maxSpeed: 3
   maxForce: 3
   cohesionRadius: 8
@@ -498,7 +498,6 @@ MonoBehaviour:
   cohesion: {x: 0, y: 0, z: 0}
   alignment: {x: 0, y: 0, z: 0}
   separation: {x: 0, y: 0, z: 0}
-  forwardDirection: {x: 0, y: 0, z: 0}
   velocity: {x: 0, y: 0, z: 0}
   cohesionTrigger: {fileID: 1724278901905150411}
   alignmentTrigger: {fileID: 409537667825448156}
